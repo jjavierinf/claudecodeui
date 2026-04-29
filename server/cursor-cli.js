@@ -4,6 +4,7 @@ import { notifyRunFailed, notifyRunStopped } from './services/notification-orche
 import { sessionsService } from './modules/providers/services/sessions.service.js';
 import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
 import { createNormalizedMessage } from './shared/utils.js';
+import { getUserEnv } from './utils/userEnv.js';
 
 // Use cross-spawn on Windows for better command execution
 const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
@@ -123,10 +124,11 @@ async function spawnCursor(command, options = {}, ws) {
       console.log('Working directory:', workingDir);
       console.log('Session info - Input sessionId:', sessionId, 'Resume:', resume);
 
+      const userEnv = getUserEnv(ws?.userId || null);
       const cursorProcess = spawnFunction('cursor-agent', args, {
         cwd: workingDir,
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env } // Inherit all environment variables
+        env: { ...process.env, ...userEnv } // process env + per-user overrides
       });
 
       activeCursorProcesses.set(processKey, cursorProcess);

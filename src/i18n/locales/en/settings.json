@@ -96,6 +96,7 @@
     "tasks": "Tasks",
     "notifications": "Notifications",
     "plugins": "Plugins",
+    "envVars": "Env Vars",
     "about": "About"
   },
   "notifications": {

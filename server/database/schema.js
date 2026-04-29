@@ -40,6 +40,19 @@ export const SESSION_NAMES_TABLE_SQL = `CREATE TABLE IF NOT EXISTS session_names
 
 export const SESSION_NAMES_LOOKUP_INDEX_SQL = `CREATE INDEX IF NOT EXISTS idx_session_names_lookup ON session_names(session_id, provider);`;
 
+export const USER_ENV_VARS_TABLE_SQL = `CREATE TABLE IF NOT EXISTS user_env_vars (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  value TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, name),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);`;
+
+export const USER_ENV_VARS_USER_INDEX_SQL = `CREATE INDEX IF NOT EXISTS idx_user_env_vars_user ON user_env_vars(user_id);`;
+
 export const DATABASE_SCHEMA_SQL = `PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -97,6 +110,10 @@ ${PUSH_SUBSCRIPTIONS_TABLE_SQL}
 ${SESSION_NAMES_TABLE_SQL}
 
 ${SESSION_NAMES_LOOKUP_INDEX_SQL}
+
+${USER_ENV_VARS_TABLE_SQL}
+
+${USER_ENV_VARS_USER_INDEX_SQL}
 
 ${APP_CONFIG_TABLE_SQL}
 `;

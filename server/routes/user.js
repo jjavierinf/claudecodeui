@@ -1,7 +1,8 @@
 import express from 'express';
-import { userDb } from '../database/db.js';
+import { userDb, userEnvVarsDb } from '../database/db.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { getSystemGitConfig } from '../utils/gitConfig.js';
+import { invalidateUserEnv, isValidEnvVarName } from '../utils/userEnv.js';
 import { spawn } from 'child_process';
 
 const router = express.Router();
@@ -117,6 +118,51 @@ router.get('/onboarding-status', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error checking onboarding status:', error);
     res.status(500).json({ error: 'Failed to check onboarding status' });
+  }
+});
+
+// Per-user environment variables. Injected into spawns (MCPs, provider CLIs, shell)
+// so each user can override env without touching the server start script.
+router.get('/env-vars', authenticateToken, (req, res) => {
+  try {
+    const vars = userEnvVarsDb.list(req.user.id);
+    res.json({ success: true, vars });
+  } catch (error) {
+    console.error('Error listing user env vars:', error);
+    res.status(500).json({ error: 'Failed to list environment variables' });
+  }
+});
+
+router.put('/env-vars', authenticateToken, (req, res) => {
+  try {
+    const { name, value } = req.body || {};
+    if (!isValidEnvVarName(name)) {
+      return res.status(400).json({ error: 'Invalid name. Use [A-Z_][A-Z0-9_]*, max 256 chars.' });
+    }
+    if (typeof value !== 'string') {
+      return res.status(400).json({ error: 'Value must be a string' });
+    }
+    userEnvVarsDb.upsert(req.user.id, name, value);
+    invalidateUserEnv(req.user.id);
+    res.json({ success: true, name, value });
+  } catch (error) {
+    console.error('Error upserting user env var:', error);
+    res.status(500).json({ error: 'Failed to save environment variable' });
+  }
+});
+
+router.delete('/env-vars/:name', authenticateToken, (req, res) => {
+  try {
+    const { name } = req.params;
+    if (!isValidEnvVarName(name)) {
+      return res.status(400).json({ error: 'Invalid name' });
+    }
+    const removed = userEnvVarsDb.remove(req.user.id, name);
+    invalidateUserEnv(req.user.id);
+    res.json({ success: true, removed });
+  } catch (error) {
+    console.error('Error deleting user env var:', error);
+    res.status(500).json({ error: 'Failed to delete environment variable' });
   }
 });
 

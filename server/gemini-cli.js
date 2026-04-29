@@ -11,6 +11,7 @@ import GeminiResponseHandler from './gemini-response-handler.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
 import { createNormalizedMessage } from './shared/utils.js';
+import { getUserEnv } from './utils/userEnv.js';
 
 let activeGeminiProcesses = new Map(); // Track active processes by session ID
 
@@ -168,11 +169,13 @@ async function spawnGemini(command, options = {}, ws) {
         spawnArgs = ['-c', 'exec "$0" "$@"', geminiPath, ...args];
     }
 
+    const userEnv = getUserEnv(ws?.userId || null);
+
     return new Promise((resolve, reject) => {
         const geminiProcess = spawnFunction(spawnCmd, spawnArgs, {
             cwd: workingDir,
             stdio: ['pipe', 'pipe', 'pipe'],
-            env: { ...process.env } // Inherit all environment variables
+            env: { ...process.env, ...userEnv } // process env + per-user overrides
         });
         let terminalNotificationSent = false;
         let terminalFailureReason = null;

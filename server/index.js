@@ -52,6 +52,7 @@ import messagesRoutes from './routes/messages.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
 import { initializeDatabase, sessionNamesDb, applyCustomSessionNames } from './database/db.js';
+import { getUserEnv } from './utils/userEnv.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
@@ -1752,6 +1753,7 @@ function handleShellConnection(ws) {
                     const termRows = data.rows || 24;
                     console.log('📐 Using terminal dimensions:', termCols, 'x', termRows);
 
+                    const userEnv = getUserEnv(ws?.userId || null);
                     shellProcess = pty.spawn(shell, shellArgs, {
                         name: 'xterm-256color',
                         cols: termCols,
@@ -1761,7 +1763,8 @@ function handleShellConnection(ws) {
                             ...process.env,
                             TERM: 'xterm-256color',
                             COLORTERM: 'truecolor',
-                            FORCE_COLOR: '3'
+                            FORCE_COLOR: '3',
+                            ...userEnv // per-user overrides last
                         }
                     });
 

@@ -10,6 +10,8 @@ import {
   PUSH_SUBSCRIPTIONS_TABLE_SQL,
   SESSION_NAMES_TABLE_SQL,
   SESSION_NAMES_LOOKUP_INDEX_SQL,
+  USER_ENV_VARS_TABLE_SQL,
+  USER_ENV_VARS_USER_INDEX_SQL,
   DATABASE_SCHEMA_SQL
 } from './schema.js';
 
@@ -111,6 +113,8 @@ const runMigrations = () => {
     db.exec(APP_CONFIG_TABLE_SQL);
     db.exec(SESSION_NAMES_TABLE_SQL);
     db.exec(SESSION_NAMES_LOOKUP_INDEX_SQL);
+    db.exec(USER_ENV_VARS_TABLE_SQL);
+    db.exec(USER_ENV_VARS_USER_INDEX_SQL);
 
     console.log('Database migrations completed successfully');
   } catch (error) {
@@ -559,6 +563,45 @@ const appConfigDb = {
   }
 };
 
+// Per-user environment variables — injected into spawns (MCPs, provider CLIs, shell)
+// so each user can override env without touching the server start script.
+const userEnvVarsDb = {
+  list: (userId) => {
+    return db.prepare(
+      'SELECT name, value, updated_at FROM user_env_vars WHERE user_id = ? ORDER BY name ASC'
+    ).all(userId);
+  },
+
+  // Returns a plain { name: value } object suitable for merging into spawn env.
+  asObject: (userId) => {
+    const rows = db.prepare(
+      'SELECT name, value FROM user_env_vars WHERE user_id = ?'
+    ).all(userId);
+    const out = {};
+    for (const row of rows) {
+      out[row.name] = row.value;
+    }
+    return out;
+  },
+
+  upsert: (userId, name, value) => {
+    db.prepare(
+      `INSERT INTO user_env_vars (user_id, name, value)
+       VALUES (?, ?, ?)
+       ON CONFLICT(user_id, name) DO UPDATE SET
+         value = excluded.value,
+         updated_at = CURRENT_TIMESTAMP`
+    ).run(userId, name, value);
+  },
+
+  remove: (userId, name) => {
+    const result = db.prepare(
+      'DELETE FROM user_env_vars WHERE user_id = ? AND name = ?'
+    ).run(userId, name);
+    return result.changes > 0;
+  },
+};
+
 // Backward compatibility - keep old names pointing to new system
 const githubTokensDb = {
   createGithubToken: (userId, tokenName, githubToken, description = null) => {
@@ -589,5 +632,6 @@ export {
   sessionNamesDb,
   applyCustomSessionNames,
   appConfigDb,
+  userEnvVarsDb,
   githubTokensDb // Backward compatibility
 };

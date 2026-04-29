@@ -28,6 +28,7 @@ import { sessionsService } from './modules/providers/services/sessions.service.j
 import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
 import { createNormalizedMessage } from './shared/utils.js';
 import { getRepoInfo } from './utils/worktrees.js';
+import { getUserEnv } from './utils/userEnv.js';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -507,9 +508,22 @@ async function queryClaudeSDK(command, options = {}, ws) {
     // Map CLI options to SDK format
     const sdkOptions = mapCliOptionsToSDK(options);
 
-    // Load MCP configuration
+    // Load MCP configuration and inject per-user env into each MCP server.
+    // The Claude Agent SDK spawns each stdio MCP as a child process; merging the user's
+    // env overrides into the server's env field is how those overrides reach MCPs.
     const mcpServers = await loadMcpConfig(options.cwd);
     if (mcpServers) {
+      const userEnv = getUserEnv(ws?.userId || null);
+      if (Object.keys(userEnv).length > 0) {
+        for (const [name, server] of Object.entries(mcpServers)) {
+          if (server && typeof server === 'object') {
+            mcpServers[name] = {
+              ...server,
+              env: { ...(server.env || {}), ...userEnv },
+            };
+          }
+        }
+      }
       sdkOptions.mcpServers = mcpServers;
     }
 
