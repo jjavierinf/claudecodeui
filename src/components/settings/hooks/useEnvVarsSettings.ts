@@ -7,6 +7,13 @@ export type EnvVar = {
   updated_at?: string;
 };
 
+export type ActiveSessionsCount = {
+  claude: number;
+  cursor: number;
+  codex: number;
+  gemini: number;
+};
+
 type ListResponse = {
   success?: boolean;
   vars?: EnvVar[];
@@ -14,6 +21,20 @@ type ListResponse = {
 };
 
 type MutationResponse = {
+  success?: boolean;
+  error?: string;
+};
+
+type RestartResponse = {
+  success?: boolean;
+  claude?: number;
+  cursor?: number;
+  codex?: number;
+  gemini?: number;
+  error?: string;
+};
+
+type ActiveCountResponse = ActiveSessionsCount & {
   success?: boolean;
   error?: string;
 };
@@ -77,9 +98,47 @@ export function useEnvVarsSettings() {
     await load();
   }, [load]);
 
+  const [activeCount, setActiveCount] = useState<ActiveSessionsCount>({ claude: 0, cursor: 0, codex: 0, gemini: 0 });
+
+  const reloadActiveCount = useCallback(async () => {
+    try {
+      const response = await authenticatedFetch('/api/user/active-sessions-count');
+      const data = (await response.json()) as ActiveCountResponse;
+      if (response.ok && data.success) {
+        setActiveCount({
+          claude: data.claude || 0,
+          cursor: data.cursor || 0,
+          codex: data.codex || 0,
+          gemini: data.gemini || 0,
+        });
+      }
+    } catch (err) {
+      console.error('Error loading active sessions count:', err);
+    }
+  }, []);
+
+  const restartSessions = useCallback(async () => {
+    setError(null);
+    const response = await authenticatedFetch('/api/user/restart-sessions', { method: 'POST' });
+    const data = (await response.json()) as RestartResponse;
+    if (!response.ok || !data.success) {
+      const message = data.error || 'Failed to restart sessions';
+      setError(message);
+      throw new Error(message);
+    }
+    await reloadActiveCount();
+    return {
+      claude: data.claude || 0,
+      cursor: data.cursor || 0,
+      codex: data.codex || 0,
+      gemini: data.gemini || 0,
+    };
+  }, [reloadActiveCount]);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void reloadActiveCount();
+  }, [load, reloadActiveCount]);
 
   return {
     vars,
@@ -88,5 +147,8 @@ export function useEnvVarsSettings() {
     reload: load,
     upsert,
     remove,
+    activeCount,
+    reloadActiveCount,
+    restartSessions,
   };
 }

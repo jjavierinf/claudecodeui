@@ -1,4 +1,4 @@
-import { Plus, Trash2, Check, X as XIcon, Pencil } from 'lucide-react';
+import { Plus, Trash2, Check, X as XIcon, Pencil, RotateCw } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Input } from '../../../../../shared/view/ui';
@@ -8,13 +8,14 @@ import { useEnvVarsSettings, isValidEnvVarName } from '../../../hooks/useEnvVars
 
 export default function EnvVarsSettingsTab() {
   const { t } = useTranslation('settings');
-  const { vars, isLoading, error, upsert, remove } = useEnvVarsSettings();
+  const { vars, isLoading, error, upsert, remove, activeCount, restartSessions } = useEnvVarsSettings();
 
   const [newName, setNewName] = useState('');
   const [newValue, setNewValue] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [editing, setEditing] = useState<{ name: string; value: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [restartFeedback, setRestartFeedback] = useState<string | null>(null);
 
   const newNameValid = newName.length === 0 || isValidEnvVarName(newName);
 
@@ -41,6 +42,30 @@ export default function EnvVarsSettingsTab() {
       setEditing(null);
     } catch {
       // Error surfaced via hook
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const totalActive = activeCount.claude + activeCount.cursor + activeCount.codex + activeCount.gemini;
+
+  const handleRestart = async () => {
+    setBusy(true);
+    setRestartFeedback(null);
+    try {
+      const counts = await restartSessions();
+      const total = counts.claude + counts.cursor + counts.codex + counts.gemini;
+      setRestartFeedback(
+        total === 0
+          ? t('envVars.restartNone', { defaultValue: 'No active sessions to restart.' })
+          : t('envVars.restartDone', {
+              count: total,
+              defaultValue: `Restarted ${total} session${total === 1 ? '' : 's'}. Send a message to spawn fresh MCPs with new env.`,
+            }),
+      );
+      window.setTimeout(() => setRestartFeedback(null), 5000);
+    } catch {
+      // Error surfaced via hook's `error`
     } finally {
       setBusy(false);
     }
@@ -204,6 +229,45 @@ export default function EnvVarsSettingsTab() {
                 defaultValue: 'Name must match [A-Za-z_][A-Za-z0-9_]* and be ≤ 256 chars.',
               })}
             </p>
+          )}
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('envVars.applyTitle', { defaultValue: 'Apply to running sessions' })}
+        description={t('envVars.applyDescription', {
+          defaultValue:
+            'MCPs and provider CLIs that are already running won\'t see env changes. Restart aborts active sessions gracefully — chat history is preserved on disk; the next message respawns MCPs with the new env.',
+        })}
+      >
+        <SettingsCard className="p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-muted-foreground">
+              {totalActive === 0
+                ? t('envVars.noActive', { defaultValue: 'No active sessions.' })
+                : t('envVars.activeSummary', {
+                    count: totalActive,
+                    defaultValue: `${totalActive} active session${totalActive === 1 ? '' : 's'}: ` +
+                      [
+                        activeCount.claude && `${activeCount.claude} agent`,
+                        activeCount.cursor && `${activeCount.cursor} cursor`,
+                        activeCount.codex && `${activeCount.codex} codex`,
+                        activeCount.gemini && `${activeCount.gemini} gemini`,
+                      ].filter(Boolean).join(', '),
+                  })}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRestart}
+              disabled={busy}
+            >
+              <RotateCw className="mr-1.5 h-3.5 w-3.5" />
+              {t('envVars.restart', { defaultValue: 'Restart sessions' })}
+            </Button>
+          </div>
+          {restartFeedback && (
+            <p className="mt-3 text-sm text-green-600 dark:text-green-400">{restartFeedback}</p>
           )}
         </SettingsCard>
       </SettingsSection>

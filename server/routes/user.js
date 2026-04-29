@@ -3,6 +3,10 @@ import { userDb, userEnvVarsDb } from '../database/db.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { getSystemGitConfig } from '../utils/gitConfig.js';
 import { invalidateUserEnv, isValidEnvVarName } from '../utils/userEnv.js';
+import { abortClaudeSDKSession, getActiveClaudeSDKSessions } from '../claude-sdk.js';
+import { abortCursorSession, getActiveCursorSessions } from '../cursor-cli.js';
+import { abortCodexSession, getActiveCodexSessions } from '../openai-codex.js';
+import { abortGeminiSession, getActiveGeminiSessions } from '../gemini-cli.js';
 import { spawn } from 'child_process';
 
 const router = express.Router();
@@ -148,6 +152,46 @@ router.put('/env-vars', authenticateToken, (req, res) => {
   } catch (error) {
     console.error('Error upserting user env var:', error);
     res.status(500).json({ error: 'Failed to save environment variable' });
+  }
+});
+
+// Abort all active provider sessions so a follow-up message respawns MCPs/CLIs
+// with the latest per-user env. JSONL chat history is preserved on disk; only
+// the live process is interrupted. Single-user scoping for now — once active-
+// session bookkeeping tracks userId, this will filter to req.user.id only.
+router.post('/restart-sessions', authenticateToken, async (req, res) => {
+  const result = { claude: 0, cursor: 0, codex: 0, gemini: 0, errors: [] };
+  try {
+    for (const id of getActiveClaudeSDKSessions()) {
+      try { await abortClaudeSDKSession(id); result.claude++; } catch (e) { result.errors.push(`claude:${id}:${e.message}`); }
+    }
+    for (const id of getActiveCursorSessions()) {
+      try { abortCursorSession(id); result.cursor++; } catch (e) { result.errors.push(`cursor:${id}:${e.message}`); }
+    }
+    for (const id of getActiveCodexSessions()) {
+      try { abortCodexSession(id); result.codex++; } catch (e) { result.errors.push(`codex:${id}:${e.message}`); }
+    }
+    for (const id of getActiveGeminiSessions()) {
+      try { abortGeminiSession(id); result.gemini++; } catch (e) { result.errors.push(`gemini:${id}:${e.message}`); }
+    }
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error restarting sessions:', error);
+    res.status(500).json({ error: 'Failed to restart sessions', ...result });
+  }
+});
+
+router.get('/active-sessions-count', authenticateToken, (_req, res) => {
+  try {
+    res.json({
+      success: true,
+      claude: getActiveClaudeSDKSessions().length,
+      cursor: getActiveCursorSessions().length,
+      codex: getActiveCodexSessions().length,
+      gemini: getActiveGeminiSessions().length,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to count active sessions' });
   }
 });
 
