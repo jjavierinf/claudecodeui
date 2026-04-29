@@ -29,6 +29,7 @@ import pty from 'node-pty';
 import mime from 'mime-types';
 
 import { getProjects, getSessions, renameProject, deleteSession, deleteProject, extractProjectDirectory, clearProjectDirectoryCache, searchConversations } from './projects.js';
+import { getRepoInfo } from './utils/worktrees.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval, getPendingApprovalsForSession, reconnectSessionWriter } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
@@ -422,6 +423,22 @@ app.post('/api/system/update', authenticateToken, async (req, res) => {
 app.get('/api/projects', authenticateToken, async (req, res) => {
     try {
         const projects = await getProjects(broadcastProgress);
+        // Enrich with gitInfo so the sidebar can group worktrees by repo and disable
+        // session-start UI on the main worktree.
+        await Promise.all(projects.map(async (project) => {
+            try {
+                const info = await getRepoInfo(project.fullPath);
+                project.gitInfo = info ? {
+                    commonDir: info.commonDir,
+                    mainWorktreePath: info.mainWorktreePath,
+                    isMainWorktree: info.isMainWorktree,
+                    branch: info.branch,
+                    repoBasename: info.repoBasename,
+                } : null;
+            } catch {
+                project.gitInfo = null;
+            }
+        }));
         res.json(projects);
     } catch (error) {
         res.status(500).json({ error: error.message });

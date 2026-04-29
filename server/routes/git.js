@@ -2,9 +2,21 @@ import express from 'express';
 import { spawn } from 'child_process';
 import path from 'path';
 import { promises as fs } from 'fs';
-import { extractProjectDirectory } from '../projects.js';
+import {
+  extractProjectDirectory,
+  loadProjectConfig,
+  saveProjectConfig,
+  addProjectManually,
+} from '../projects.js';
 import { queryClaudeSDK } from '../claude-sdk.js';
 import { spawnCursor } from '../cursor-cli.js';
+import {
+  getRepoInfo,
+  listWorktrees,
+  createTask,
+  removeTask,
+  hasUncommittedChanges,
+} from '../utils/worktrees.js';
 
 const router = express.Router();
 const COMMIT_DIFF_CHARACTER_LIMIT = 500_000;
@@ -1482,6 +1494,154 @@ router.post('/delete-untracked', async (req, res) => {
   } catch (error) {
     console.error('Git delete untracked error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== Tasks (worktree-backed) =====
+
+function encodeProjectName(absolutePath) {
+  return absolutePath.replace(/[\\/:\s~_]/g, '-');
+}
+
+async function enrichTaskRecord(wt) {
+  const projectName = encodeProjectName(wt.path);
+  let dirty = false;
+  try { dirty = await hasUncommittedChanges(wt.path); } catch { dirty = false; }
+  return {
+    path: wt.path,
+    branch: wt.branch,
+    head: wt.head,
+    isMain: wt.isMain,
+    isDetached: wt.isDetached,
+    isLocked: wt.isLocked,
+    isPrunable: wt.isPrunable,
+    isBare: wt.isBare,
+    projectName,
+    hasUncommittedChanges: dirty,
+  };
+}
+
+// Auto-register a worktree as a manual project so it appears in /api/projects.
+// Idempotent: silently skip if already registered.
+async function ensureProjectRegistered(absolutePath) {
+  try {
+    await addProjectManually(absolutePath);
+  } catch (err) {
+    // already-configured / already-exists is expected; log others
+    if (!/already configured/i.test(err.message)) {
+      console.warn('ensureProjectRegistered:', err.message);
+    }
+  }
+}
+
+// GET /api/git/tasks?repoPath=<absolute>
+// Lists all worktrees of a repo; auto-registers any unknown ones as projects.
+router.get('/tasks', async (req, res) => {
+  try {
+    const repoPath = req.query.repoPath;
+    if (!repoPath || typeof repoPath !== 'string') {
+      return res.status(400).json({ error: 'repoPath query param is required' });
+    }
+    const validated = validateProjectPath(repoPath);
+    const info = await getRepoInfo(validated);
+    if (!info) return res.status(400).json({ error: 'Path is not a git repository' });
+
+    const worktrees = await listWorktrees(validated);
+    const tasks = await Promise.all(worktrees.map(enrichTaskRecord));
+
+    // Register non-main worktrees as projects so the UI can navigate to them.
+    await Promise.all(
+      tasks.filter((t) => !t.isMain).map((t) => ensureProjectRegistered(t.path)),
+    );
+
+    res.json({
+      repoInfo: {
+        commonDir: info.commonDir,
+        mainWorktreePath: info.mainWorktreePath,
+        repoBasename: info.repoBasename,
+        currentBranch: info.branch,
+        isMainWorktree: info.isMainWorktree,
+      },
+      tasks,
+    });
+  } catch (error) {
+    console.error('GET /api/git/tasks error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/git/tasks  body: { repoPath, name }
+router.post('/tasks', async (req, res) => {
+  try {
+    const { repoPath, name } = req.body || {};
+    if (!repoPath || typeof repoPath !== 'string') {
+      return res.status(400).json({ error: 'repoPath is required' });
+    }
+    const validated = validateProjectPath(repoPath);
+    const result = await createTask({ repoPath: validated, name });
+
+    // Register the new worktree as a project
+    let project = null;
+    try {
+      project = await addProjectManually(result.path);
+    } catch (err) {
+      // If somehow already registered, fetch existing-ish info from config
+      if (/already configured/i.test(err.message)) {
+        project = { name: encodeProjectName(result.path), path: result.path, fullPath: result.path };
+      } else {
+        throw err;
+      }
+    }
+
+    res.json({
+      task: {
+        path: result.path,
+        branch: result.branch,
+        projectName: project?.name || encodeProjectName(result.path),
+        nodeModulesSymlink: result.nodeModulesSymlink,
+        mainWorktreePath: result.mainWorktreePath,
+      },
+      project,
+    });
+  } catch (error) {
+    console.error('POST /api/git/tasks error:', error);
+    const msg = error.message || 'Failed to create task';
+    const status = /already exists|invalid|empty|too long|needs at least one commit|not a git/i.test(msg)
+      ? 400
+      : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
+// DELETE /api/git/tasks  body: { worktreePath, force? }
+router.delete('/tasks', async (req, res) => {
+  try {
+    const { worktreePath, force } = req.body || {};
+    if (!worktreePath || typeof worktreePath !== 'string') {
+      return res.status(400).json({ error: 'worktreePath is required' });
+    }
+    const validated = validateProjectPath(worktreePath);
+
+    await removeTask({ worktreePath: validated, force: Boolean(force) });
+
+    // Deregister from project-config.json
+    const projectName = encodeProjectName(validated);
+    try {
+      const config = await loadProjectConfig();
+      if (config[projectName]) {
+        delete config[projectName];
+        await saveProjectConfig(config);
+      }
+    } catch (err) {
+      console.warn('deregister project on remove:', err.message);
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('DELETE /api/git/tasks error:', error);
+    const msg = error.message || 'Failed to remove task';
+    const status = /modified or untracked|main worktree|not a git/i.test(msg) ? 400 : 500;
+    res.status(status).json({ error: msg });
   }
 });
 

@@ -101,6 +101,8 @@ interface ChatComposerProps {
   placeholder: string;
   isTextareaExpanded: boolean;
   sendByCtrlEnter?: boolean;
+  readOnly?: boolean;
+  readOnlyMessage?: string;
 }
 
 export default function ChatComposer({
@@ -156,6 +158,8 @@ export default function ChatComposer({
   placeholder,
   isTextareaExpanded,
   sendByCtrlEnter,
+  readOnly,
+  readOnlyMessage,
 }: ChatComposerProps) {
   const { t } = useTranslation('chat');
   const textareaRect = textareaRef.current?.getBoundingClientRect();
@@ -172,6 +176,19 @@ export default function ChatComposer({
 
   // Hide the thinking/status bar while any permission request is pending
   const hasPendingPermissions = pendingPermissionRequests.length > 0;
+
+  if (readOnly) {
+    return (
+      <div className="flex-shrink-0 p-2 pb-2 sm:p-4 sm:pb-4 md:p-4 md:pb-6">
+        <div className="mx-auto max-w-4xl rounded-xl border border-border/60 bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+          <div className="font-semibold text-foreground">Main worktree — read-only</div>
+          <p className="mt-1">
+            {readOnlyMessage || 'Create a task from the sidebar (+ Task) to start a session in a dedicated worktree.'}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-shrink-0 p-2 pb-2 sm:p-4 sm:pb-4 md:p-4 md:pb-6">

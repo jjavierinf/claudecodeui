@@ -27,6 +27,7 @@ import {
 import { sessionsService } from './modules/providers/services/sessions.service.js';
 import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
 import { createNormalizedMessage } from './shared/utils.js';
+import { getRepoInfo } from './utils/worktrees.js';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -151,7 +152,9 @@ function mapCliOptionsToSDK(options = {}) {
 
   // Forward all host env vars (e.g. ANTHROPIC_BASE_URL) to the subprocess.
   // Since SDK 0.2.113, options.env replaces process.env instead of overlaying it.
-  sdkOptions.env = { ...process.env };
+  // CLAUDE_VIA_WEBUI=1 lets PreToolUse hooks distinguish UI-launched sessions from CLI ones
+  // (used by repo-local hooks to enforce worktree-only edits as defense-in-depth).
+  sdkOptions.env = { ...process.env, CLAUDE_VIA_WEBUI: '1' };
 
   // Use CLAUDE_CLI_PATH if explicitly set, otherwise fall back to 'claude' on PATH.
   // The SDK 0.2.113+ looks for a bundled native binary optional dep by default;
@@ -492,6 +495,15 @@ async function queryClaudeSDK(command, options = {}, ws) {
   };
 
   try {
+    // Block sessions on the main worktree of a git repo. Tasks (linked worktrees) are the
+    // only valid place to start a session — see docs/superpowers/specs/2026-04-29-claudecodeui-worktrees-as-tasks-design.md
+    if (options.cwd) {
+      const repoInfo = await getRepoInfo(options.cwd);
+      if (repoInfo && repoInfo.isMainWorktree) {
+        throw new Error('This is the main worktree of a git repo. Create or open a task to start a session.');
+      }
+    }
+
     // Map CLI options to SDK format
     const sdkOptions = mapCliOptionsToSDK(options);
 

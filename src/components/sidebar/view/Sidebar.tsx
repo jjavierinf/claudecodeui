@@ -180,6 +180,9 @@ function Sidebar({
     onSaveEditingSession: (projectName: string, sessionId: string, summary: string, provider: LLMProvider) => {
       void updateSessionSummary(projectName, sessionId, summary, provider);
     },
+    onProjectsRefresh: () => {
+      void refreshProjects();
+    },
     t,
   };
 

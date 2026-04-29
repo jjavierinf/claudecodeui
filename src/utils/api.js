@@ -202,6 +202,22 @@ export const api = {
       body: JSON.stringify({ path: folderPath }),
     }),
 
+  // Worktree-backed tasks (one branch + worktree per task)
+  tasks: {
+    list: (repoPath) =>
+      authenticatedFetch(`/api/git/tasks?repoPath=${encodeURIComponent(repoPath)}`),
+    create: (repoPath, name) =>
+      authenticatedFetch('/api/git/tasks', {
+        method: 'POST',
+        body: JSON.stringify({ repoPath, name }),
+      }),
+    remove: (worktreePath, force = false) =>
+      authenticatedFetch('/api/git/tasks', {
+        method: 'DELETE',
+        body: JSON.stringify({ worktreePath, force }),
+      }),
+  },
+
   // User endpoints
   user: {
     gitConfig: () => authenticatedFetch('/api/user/git-config'),

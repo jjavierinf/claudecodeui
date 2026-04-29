@@ -348,6 +348,7 @@ function ChatInterface({
         />
 
         <ChatComposer
+          readOnly={Boolean(selectedProject?.gitInfo?.isMainWorktree)}
           pendingPermissionRequests={pendingPermissionRequests}
           handlePermissionDecision={handlePermissionDecision}
           handleGrantToolPermission={handleGrantToolPermission}
