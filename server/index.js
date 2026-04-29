@@ -134,6 +134,7 @@ async function setupProjectsWatcher() {
 
                 // Get updated projects list
                 const updatedProjects = await getProjects(broadcastProgress);
+                await enrichProjectsWithGitInfo(updatedProjects);
 
                 // Notify all connected clients about the project changes
                 const updateMessage = JSON.stringify({
@@ -420,25 +421,31 @@ app.post('/api/system/update', authenticateToken, async (req, res) => {
     }
 });
 
+// Enrich projects in place with gitInfo so the sidebar can group worktrees by repo
+// and disable session-start UI on the main worktree. Used by both the HTTP /api/projects
+// endpoint and the WebSocket projects_updated broadcaster.
+async function enrichProjectsWithGitInfo(projects) {
+    await Promise.all(projects.map(async (project) => {
+        try {
+            const info = await getRepoInfo(project.fullPath);
+            project.gitInfo = info ? {
+                commonDir: info.commonDir,
+                mainWorktreePath: info.mainWorktreePath,
+                isMainWorktree: info.isMainWorktree,
+                branch: info.branch,
+                repoBasename: info.repoBasename,
+            } : null;
+        } catch {
+            project.gitInfo = null;
+        }
+    }));
+    return projects;
+}
+
 app.get('/api/projects', authenticateToken, async (req, res) => {
     try {
         const projects = await getProjects(broadcastProgress);
-        // Enrich with gitInfo so the sidebar can group worktrees by repo and disable
-        // session-start UI on the main worktree.
-        await Promise.all(projects.map(async (project) => {
-            try {
-                const info = await getRepoInfo(project.fullPath);
-                project.gitInfo = info ? {
-                    commonDir: info.commonDir,
-                    mainWorktreePath: info.mainWorktreePath,
-                    isMainWorktree: info.isMainWorktree,
-                    branch: info.branch,
-                    repoBasename: info.repoBasename,
-                } : null;
-            } catch {
-                project.gitInfo = null;
-            }
-        }));
+        await enrichProjectsWithGitInfo(projects);
         res.json(projects);
     } catch (error) {
         res.status(500).json({ error: error.message });

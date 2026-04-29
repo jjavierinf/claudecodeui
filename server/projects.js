@@ -396,14 +396,18 @@ async function getProjects(progressCallback = null) {
 
     // First, get existing Claude projects from the file system
     const entries = await fs.readdir(claudeDir, { withFileTypes: true });
-    directories = entries.filter(e => e.isDirectory());
+    const allDirectories = entries.filter(e => e.isDirectory());
 
-    // Build set of existing project names for later
-    directories.forEach(e => existingProjects.add(e.name));
+    // Build set of existing project names for later (includes hidden — the manual
+    // project loop below uses this to dedupe against directory entries).
+    allDirectories.forEach(e => existingProjects.add(e.name));
 
-    // Count manual projects not already in directories
+    // Filter out projects the user marked as "remove from sidebar only".
+    directories = allDirectories.filter(e => !config[e.name]?.hidden);
+
+    // Count manual projects not already in directories and not hidden
     const manualProjectsCount = Object.entries(config)
-      .filter(([name, cfg]) => cfg.manuallyAdded && !existingProjects.has(name))
+      .filter(([name, cfg]) => cfg.manuallyAdded && !existingProjects.has(name) && !cfg.hidden)
       .length;
 
     totalProjects = directories.length + manualProjectsCount;
@@ -521,12 +525,13 @@ async function getProjects(progressCallback = null) {
     }
     // Calculate total for manual projects only (no directories exist)
     totalProjects = Object.entries(config)
-      .filter(([name, cfg]) => cfg.manuallyAdded)
+      .filter(([name, cfg]) => cfg.manuallyAdded && !cfg.hidden)
       .length;
   }
 
   // Add manually configured projects that don't exist as folders yet
   for (const [projectName, projectConfig] of Object.entries(config)) {
+    if (projectConfig.hidden) continue;
     if (!existingProjects.has(projectName) && projectConfig.manuallyAdded) {
       processedProjects++;
 
@@ -1165,6 +1170,8 @@ async function isProjectEmpty(projectName) {
 
 // Remove a project from the UI.
 // When deleteData=true, also delete session/memory files on disk (destructive).
+// When deleteData=false ("remove from sidebar only"), preserve files but mark
+// the project hidden in the config so getProjects skips it on subsequent refreshes.
 async function deleteProject(projectName, force = false, deleteData = false) {
   const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
 
@@ -1212,8 +1219,13 @@ async function deleteProject(projectName, force = false, deleteData = false) {
       }
     }
 
-    // Always remove from project config
-    delete config[projectName];
+    if (deleteData) {
+      // Files are gone — drop the config entry too.
+      delete config[projectName];
+    } else {
+      // Sidebar-only removal — preserve any custom name/path settings, just hide it.
+      config[projectName] = { ...(config[projectName] || {}), hidden: true };
+    }
     await saveProjectConfig(config);
 
     return true;
@@ -1241,7 +1253,9 @@ async function addProjectManually(projectPath, displayName = null) {
   const config = await loadProjectConfig();
   const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
 
-  if (config[projectName]) {
+  // If the project was previously "removed from sidebar only", just unhide it instead
+  // of erroring out — that's the natural way for users to bring it back.
+  if (config[projectName] && !config[projectName].hidden) {
     throw new Error(`Project already configured for path: ${absolutePath}`);
   }
 
@@ -1250,8 +1264,10 @@ async function addProjectManually(projectPath, displayName = null) {
 
   // Add to config as manually added project
   config[projectName] = {
+    ...(config[projectName] || {}),
     manuallyAdded: true,
-    originalPath: absolutePath
+    originalPath: absolutePath,
+    hidden: false,
   };
 
   if (displayName) {

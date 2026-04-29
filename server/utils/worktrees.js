@@ -208,6 +208,29 @@ export function validateTaskName(name) {
 }
 
 /**
+ * Best-effort copy of .mcp.json from main into the new worktree.
+ * Copy (not symlink) so each worktree can diverge its MCP config without
+ * surprising the main repo. No-op if main has no .mcp.json or dest already exists.
+ */
+export async function copyMcpJson(mainPath, worktreePath) {
+  const src = path.join(mainPath, '.mcp.json');
+  const dest = path.join(worktreePath, '.mcp.json');
+  try {
+    await fs.access(src);
+  } catch {
+    return { copied: false, reason: 'src-missing' };
+  }
+  try {
+    await fs.lstat(dest);
+    return { copied: false, reason: 'dest-exists' };
+  } catch {
+    // dest missing — good
+  }
+  await fs.copyFile(src, dest);
+  return { copied: true };
+}
+
+/**
  * Best-effort symlink of node_modules from main into the new worktree.
  * No-op if main has no node_modules.
  */
@@ -275,6 +298,15 @@ export async function createTask({ repoPath, name }) {
     symlinkResult = { linked: false, reason: `symlink-failed: ${err.message}` };
   }
 
+  // Best-effort copy of .mcp.json so MCP servers with scope=project are available
+  // in the worktree (the file is gitignored, so it won't come along via git).
+  let mcpCopyResult = { copied: false, reason: 'unknown' };
+  try {
+    mcpCopyResult = await copyMcpJson(mainPath, worktreePath);
+  } catch (err) {
+    mcpCopyResult = { copied: false, reason: `copy-failed: ${err.message}` };
+  }
+
   clearRepoInfoCache(worktreePath);
   clearRepoInfoCache(mainPath);
 
@@ -283,6 +315,7 @@ export async function createTask({ repoPath, name }) {
     branch: taskName,
     mainWorktreePath: mainPath,
     nodeModulesSymlink: symlinkResult,
+    mcpJsonCopy: mcpCopyResult,
   };
 }
 
